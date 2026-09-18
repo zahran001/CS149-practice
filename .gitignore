@@ -1,0 +1,41 @@
+# ---- Compiled binaries / build artifacts ----
+*.exe
+*.out
+*.app
+*.o
+*.obj
+*.a
+*.lib
+*.dll
+*.so
+*.so.*
+*.dylib
+
+# ---- Linker / debugger leftovers (MSVC & MinGW) ----
+*.exp
+*.ilk
+*.pdb
+*.idb
+*.map
+
+# ---- Crash dumps ----
+*.stackdump
+core
+core.*
+
+# ---- Profiling output ----
+perf.data
+perf.data.old
+gmon.out
+*.gcda
+*.gcno
+*.gcov
+
+# ---- Editor / OS cruft ----
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+*~
+*.swp
