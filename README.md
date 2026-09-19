@@ -13,6 +13,8 @@ repository root. gcc appends `.exe` automatically.
 | [sinx_single_thread.c](sinx_single_thread.c) | Scalar baseline, single thread |
 | [sinx_multi_thread.c](sinx_multi_thread.c) | Splits the array across 2 pthreads |
 | [sinx_avx2.c](sinx_avx2.c) | Hand-written AVX intrinsics, 8 floats per iteration |
+| [ispc/main.cpp](ispc/main.cpp) | ISPC correctness check against `std::sin` |
+| [ispc/bench.cpp](ispc/bench.cpp) | Times all three ISPC variants vs a scalar reference |
 
 ## Build and run
 
@@ -33,6 +35,27 @@ gcc -O3 -fno-tree-vectorize -pthread -std=c23 -o multi_thread sinx_multi_thread.
 ```powershell
 gcc -O3 -march=native -std=c23 -o sinx_avx sinx_avx2.c ; .\sinx_avx.exe
 ```
+
+**ISPC correctness check** (`ispc/main.cpp`)
+
+```powershell
+cd ispc ; ispc -O2 --arch=x86-64 --target=avx2-i32x8 -h sinx_interleaved.h -o sinx_interleaved.obj sinx_interleaved.ispc ; g++ -O3 -std=c++17 -o ispc_demo main.cpp sinx_interleaved.obj ; .\ispc_demo.exe
+```
+
+**ISPC three-way benchmark** (`ispc/bench.cpp`)
+
+```powershell
+cd ispc ; foreach ($v in 'interleaved','blocked','foreach') { ispc -O2 --arch=x86-64 --target=avx2-i32x8 -h "sinx_$v.h" -o "sinx_$v.obj" "sinx_$v.ispc" } ; g++ -O3 -fno-tree-vectorize -std=c++17 -o ispc_bench bench.cpp sinx_interleaved.obj sinx_blocked.obj sinx_foreach.obj ; .\ispc_bench.exe
+```
+
+Already built? Just run them:
+
+```powershell
+cd ispc ; .\ispc_demo.exe
+cd ispc ; .\ispc_bench.exe 33554432 5 5
+```
+
+See [ISPC](#ispc-ispc) below for what the variants do and the gotchas.
 
 ## Flags
 
@@ -109,3 +132,67 @@ int terms = 10;
   and constant-folds `terms`, unrolling the inner loop, while the threaded build receives
   `terms` from a struct at runtime and gets the generic loop. Making `terms` a
   compile-time constant on both paths removes the gap.
+
+## ISPC (`ispc/`)
+
+Three SPMD variants of the same kernel, each exporting a **different** symbol so all
+three can link into one binary and be compared head to head.
+
+| File | Exported function | Work assignment |
+|---|---|---|
+| [ispc/sinx_interleaved.ispc](ispc/sinx_interleaved.ispc) | `ispc_sinx` | lane `i` takes `i, i+programCount, ...` |
+| [ispc/sinx_blocked.ispc](ispc/sinx_blocked.ispc) | `ispc_sinx_v2` | lane `i` takes a contiguous block |
+| [ispc/sinx_foreach.ispc](ispc/sinx_foreach.ispc) | `ispc_sinx_foreach` | `foreach`, compiler decides |
+
+Building is two stages: `ispc` emits an object file **plus** a C++ header, then g++
+compiles the host code and links the object.
+
+**Correctness demo** ([ispc/main.cpp](ispc/main.cpp)) — prints ISPC vs `std::sin`:
+
+```powershell
+cd ispc ; ispc -O2 --arch=x86-64 --target=avx2-i32x8 -h sinx_interleaved.h -o sinx_interleaved.obj sinx_interleaved.ispc ; g++ -O3 -std=c++17 -o ispc_demo main.cpp sinx_interleaved.obj ; .\ispc_demo.exe
+```
+
+**Three-way benchmark** ([ispc/bench.cpp](ispc/bench.cpp)) — times all variants against a
+scalar reference and checks they agree:
+
+```powershell
+cd ispc ; foreach ($v in 'interleaved','blocked','foreach') { ispc -O2 --arch=x86-64 --target=avx2-i32x8 -h "sinx_$v.h" -o "sinx_$v.obj" "sinx_$v.ispc" } ; g++ -O3 -fno-tree-vectorize -std=c++17 -o ispc_bench bench.cpp sinx_interleaved.obj sinx_blocked.obj sinx_foreach.obj ; .\ispc_bench.exe
+```
+
+Takes optional `N terms reps` arguments, e.g. `.\ispc_bench.exe 33554432 5 5`.
+
+### Result (N = 33.5M, terms = 5, avx2-i32x8)
+
+```
+scalar (reference)     0.2396 s    140.1 Melem/s    1.00x
+ispc interleaved       0.0351 s    954.7 Melem/s    6.82x
+ispc blocked           0.0494 s    679.2 Melem/s    4.85x
+ispc foreach           0.0344 s    976.2 Melem/s    6.97x
+```
+
+Interleaved and `foreach` land together near the 8x ceiling of an 8-wide target;
+**blocked is ~30% slower** because giving each lane a contiguous block makes the lanes
+read non-adjacent addresses. ispc says so at compile time:
+
+```
+sinx_blocked.ispc:17:27: Performance Warning: Gather required to load value.
+sinx_blocked.ispc:31:13: Performance Warning: Scatter required to store value.
+```
+
+That warning is the whole point of the exercise — watch for it.
+
+### Gotchas
+
+- **`uniform float* x` is a *varying pointer* to uniform float.** The qualifier binds to
+  the pointee. Exported functions need `uniform float* uniform x`, or ispc rejects it with
+  *"Varying pointer type parameter is illegal in an exported function"*.
+- **The generated header wraps declarations in `namespace ispc`**, so call
+  `ispc::ispc_sinx(...)` or add `using namespace ispc;`.
+- **`Warning: corrupt .drectve at end of def file` is benign** — MinGW reading MSVC-style
+  directives in ispc's COFF object. It links and runs correctly.
+- **Keep `terms <= 5`.** `denom` is `uniform int` and holds `(2j+1)!`, so it overflows
+  int32 at `j = 6` (`13! = 6.2e9`). Widening to `int64` does not rescue `terms = 10`
+  (`21! = 5.1e19` overflows int64 as well) and costs ~5x speed, because 64-bit
+  integer-to-float conversion has no efficient AVX2 vector form and ispc scalarizes it.
+  For more terms, make `denom` a `float`/`double`.

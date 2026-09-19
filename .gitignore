@@ -39,3 +39,6 @@ Thumbs.db
 desktop.ini
 *~
 *.swp
+
+# ---- ISPC generated artifacts ----
+ispc/sinx_*.h
