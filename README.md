@@ -1,4 +1,4 @@
-# CS149 — Throughput Computing
+# CS149 - PARALLEL COMPUTING
 
 Implementations of `sin(x)` via Taylor series, used to compare scalar, multi-threaded,
 and SIMD execution.
@@ -12,7 +12,8 @@ repository root. gcc appends `.exe` automatically.
 |---|---|
 | [sinx_single_thread.c](sinx_single_thread.c) | Scalar baseline, single thread |
 | [sinx_multi_thread.c](sinx_multi_thread.c) | Splits the array across 2 pthreads |
-| [sinx_avx2.c](sinx_avx2.c) | Hand-written AVX intrinsics, 8 floats per iteration |
+| [sinx_avx2.c](sinx_avx2.c) | AVX intrinsics, 8 floats per iteration |
+| [thread_launch.cpp](thread_launch.cpp) | Thread launch overhead: serial calls vs one thread per task vs a thread pool |
 | [ispc/main.cpp](ispc/main.cpp) | ISPC correctness check against `std::sin` |
 | [ispc/bench.cpp](ispc/bench.cpp) | Times all three ISPC variants vs a scalar reference |
 
@@ -34,6 +35,12 @@ gcc -O3 -fno-tree-vectorize -pthread -std=c23 -o multi_thread sinx_multi_thread.
 
 ```powershell
 gcc -O3 -march=native -std=c23 -o sinx_avx sinx_avx2.c ; .\sinx_avx.exe
+```
+
+**Thread launch overhead**
+
+```powershell
+g++ -O3 -std=c++23 thread_launch.cpp -o thread_launch -pthread ; .\thread_launch.exe
 ```
 
 **ISPC correctness check** (`ispc/main.cpp`)
@@ -196,3 +203,8 @@ That warning is the whole point of the exercise — watch for it.
   (`21! = 5.1e19` overflows int64 as well) and costs ~5x speed, because 64-bit
   integer-to-float conversion has no efficient AVX2 vector form and ispc scalarizes it.
   For more terms, make `denom` a `float`/`double`.
+
+
+### Reference
+
+https://gfxcourses.stanford.edu/cs149/fall25
